@@ -6,35 +6,11 @@
         <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-capable" content="yes">
-        <link rel="stylesheet" href="./resources/ol.css">
-        <link rel="stylesheet" href="resources/fontawesome-all.min.css">
-        <link href="resources/photon-geocoder-autocomplete.min.css" rel="stylesheet">
-        <link rel="stylesheet" href="./resources/ol-layerswitcher.css">
-        <link rel="stylesheet" href="./resources/qgis2web.css">
-        <style>
-        html, body {
-            background-color: #ffffff;
-        }
-        .ol-control > * {
-            background-color: #f8f8f8!important;
-            color: #444444!important;
-            border-radius: 0px;
-        }
-        .ol-attribution a, .gcd-gl-input::placeholder, .search-layer-input-search::placeholder {
-            color: #444444!important;
-        }
-        .search-layer-input-search {
-            background-color: #f8f8f8!important;
-        }
-        .ol-control > *:focus, .ol-control >*:hover {
-            background-color: rgba(248, 248, 248, 0.7)!important;
-        } 
-        .ol-control {
-            background-color: rgba(255,255,255,.4) !important;
-            padding: 2px !important;
-        } 
-        </style>
-
+        <link rel="stylesheet" href="css/leaflet.css">
+        <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
+        <link rel="stylesheet" href="css/qgis2web.css">
+        <link rel="stylesheet" href="css/fontawesome-all.min.css">
+        <link rel="stylesheet" href="css/leaflet.photon.css">
         <style>
         #map {
             width: 1334px;
@@ -45,20 +21,273 @@
     </head>
     <body>
         <div id="map">
-            <div id="popup" class="ol-popup">
-                <a href="#" id="popup-closer" class="ol-popup-closer"></a>
-                <div id="popup-content"></div>
-            </div>
         </div>
-        <script src="resources/qgis2web_expressions.js"></script>
-        <script src="./resources/functions.js"></script>
-        <script src="./resources/ol.js"></script>
-        <script src="./resources/ol-layerswitcher.js"></script>
-        <script src="resources/photon-geocoder-autocomplete.min.js"></script>
-        <script src="layers/ProjectBoundary_9.js"></script>
-        <script src="styles/ProjectBoundary_9_style.js"></script>
-        <script src="./layers/layers.js" type="text/javascript"></script> 
-        <script src="./resources/Autolinker.min.js"></script>
-        <script src="./resources/qgis2web.js"></script>
+        <script src="js/qgis2web_expressions.js"></script>
+        <script src="js/leaflet.js"></script>
+        <script src="js/L.Control.Layers.Tree.min.js"></script>
+        <script src="js/leaflet.rotatedMarker.js"></script>
+        <script src="js/leaflet.pattern.js"></script>
+        <script src="js/leaflet-hash.js"></script>
+        <script src="js/Autolinker.min.js"></script>
+        <script src="js/rbush.min.js"></script>
+        <script src="js/labelgun.min.js"></script>
+        <script src="js/labels.js"></script>
+        <script src="js/leaflet.photon.js"></script>
+        <script src="data/ProjectBoundary_9.js"></script>
+        <script>
+        var highlightLayer;
+        function highlightFeature(e) {
+            highlightLayer = e.target;
+            highlightLayer.openPopup();
+        }
+        var map = L.map('map', {
+            zoomControl:false, maxZoom:28, minZoom:1
+        }).fitBounds([[7.0935365322594475,79.69427640724611],[8.40744798564937,81.81472414910105]]);
+        var hash = new L.Hash(map);
+        map.attributionControl.setPrefix('<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
+        var autolinker = new Autolinker({truncate: {length: 30, location: 'smart'}});
+        // remove popup's row if "visible-with-data"
+        function removeEmptyRowsFromPopupContent(content, feature) {
+         var tempDiv = document.createElement('div');
+         tempDiv.innerHTML = content;
+         var rows = tempDiv.querySelectorAll('tr');
+         for (var i = 0; i < rows.length; i++) {
+             var td = rows[i].querySelector('td.visible-with-data');
+             var key = td ? td.id : '';
+             if (td && td.classList.contains('visible-with-data') && feature.properties[key] == null) {
+                 rows[i].parentNode.removeChild(rows[i]);
+             }
+         }
+         return tempDiv.innerHTML;
+        }
+        // modify popup if contains media
+        function addClassToPopupIfMedia(content, popup) {
+            var tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            var imgTd = tempDiv.querySelector('td img');
+            if (imgTd) {
+                var src = imgTd.getAttribute('src');
+                if (/\.(jpg|jpeg|png|gif|bmp|webp|avif)$/i.test(src)) {
+                    popup._contentNode.classList.add('media');
+                    setTimeout(function() {
+                        popup.update();
+                    }, 10);
+                } else if (/\.(mp3|wav|ogg|aac)$/i.test(src)) {
+                    var audio = document.createElement('audio');
+                    audio.controls = true;
+                    audio.src = src;
+                    imgTd.parentNode.replaceChild(audio, imgTd);
+                    popup._contentNode.classList.add('media');
+                    setTimeout(function() {
+                        popup.setContent(tempDiv.innerHTML);
+                        popup.update();
+                    }, 10);
+                } else if (/\.(mp4|webm|ogg|mov)$/i.test(src)) {
+                    var video = document.createElement('video');
+                    video.controls = true;
+                    video.src = src;
+                    video.style.width = "400px";
+                    video.style.height = "300px";
+                    video.style.maxHeight = "60vh";
+                    video.style.maxWidth = "60vw";
+                    imgTd.parentNode.replaceChild(video, imgTd);
+                    popup._contentNode.classList.add('media');
+                    // Aggiorna il popup quando il video carica i metadati
+                    video.addEventListener('loadedmetadata', function() {
+                        popup.update();
+                    });
+                    setTimeout(function() {
+                        popup.setContent(tempDiv.innerHTML);
+                        popup.update();
+                    }, 10);
+                } else {
+                    popup._contentNode.classList.remove('media');
+                }
+            } else {
+                popup._contentNode.classList.remove('media');
+            }
+        }
+        var zoomControl = L.control.zoom({
+            position: 'topleft'
+        }).addTo(map);
+        var bounds_group = new L.featureGroup([]);
+        function setBounds() {
+        }
+        map.createPane('pane_OpenStreetMap_0');
+        map.getPane('pane_OpenStreetMap_0').style.zIndex = 400;
+        var layer_OpenStreetMap_0 = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            pane: 'pane_OpenStreetMap_0',
+            opacity: 1.0,
+            attribution: '',
+            minZoom: 1,
+            maxZoom: 28,
+            minNativeZoom: 0,
+            maxNativeZoom: 19
+        });
+        layer_OpenStreetMap_0;
+        map.addLayer(layer_OpenStreetMap_0);
+        map.createPane('pane_LocationbasedPriorityInterventionOption_1');
+        map.getPane('pane_LocationbasedPriorityInterventionOption_1').style.zIndex = 401;
+        var img_LocationbasedPriorityInterventionOption_1 = 'data/LocationbasedPriorityInterventionOption_1.png';
+        var img_bounds_LocationbasedPriorityInterventionOption_1 = [[7.189866965445821,79.83172443102876],[8.440916378211442,81.06479260093205]];
+        var layer_LocationbasedPriorityInterventionOption_1 = new L.imageOverlay(img_LocationbasedPriorityInterventionOption_1,
+                                              img_bounds_LocationbasedPriorityInterventionOption_1,
+                                              {pane: 'pane_LocationbasedPriorityInterventionOption_1'});
+        bounds_group.addLayer(layer_LocationbasedPriorityInterventionOption_1);
+        map.addLayer(layer_LocationbasedPriorityInterventionOption_1);
+        map.createPane('pane_Restorationandsustainableintensificationofplantations_2');
+        map.getPane('pane_Restorationandsustainableintensificationofplantations_2').style.zIndex = 402;
+        var img_Restorationandsustainableintensificationofplantations_2 = 'data/Restorationandsustainableintensificationofplantations_2.png';
+        var img_bounds_Restorationandsustainableintensificationofplantations_2 = [[7.189537946368948,79.82972509019021],[8.440562935775374,81.06277364521755]];
+        var layer_Restorationandsustainableintensificationofplantations_2 = new L.imageOverlay(img_Restorationandsustainableintensificationofplantations_2,
+                                              img_bounds_Restorationandsustainableintensificationofplantations_2,
+                                              {pane: 'pane_Restorationandsustainableintensificationofplantations_2'});
+        bounds_group.addLayer(layer_Restorationandsustainableintensificationofplantations_2);
+        map.addLayer(layer_Restorationandsustainableintensificationofplantations_2);
+        map.createPane('pane_Sustainableintensificationofsmallholderproduction_3');
+        map.getPane('pane_Sustainableintensificationofsmallholderproduction_3').style.zIndex = 403;
+        var img_Sustainableintensificationofsmallholderproduction_3 = 'data/Sustainableintensificationofsmallholderproduction_3.png';
+        var img_bounds_Sustainableintensificationofsmallholderproduction_3 = [[7.189537946368948,79.82972509019021],[8.440562935775374,81.06277364521755]];
+        var layer_Sustainableintensificationofsmallholderproduction_3 = new L.imageOverlay(img_Sustainableintensificationofsmallholderproduction_3,
+                                              img_bounds_Sustainableintensificationofsmallholderproduction_3,
+                                              {pane: 'pane_Sustainableintensificationofsmallholderproduction_3'});
+        bounds_group.addLayer(layer_Sustainableintensificationofsmallholderproduction_3);
+        map.addLayer(layer_Sustainableintensificationofsmallholderproduction_3);
+        map.createPane('pane_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4');
+        map.getPane('pane_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4').style.zIndex = 404;
+        var img_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4 = 'data/Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4.png';
+        var img_bounds_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4 = [[7.189537946368948,79.82972509019021],[8.440562935775374,81.06277364521755]];
+        var layer_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4 = new L.imageOverlay(img_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4,
+                                              img_bounds_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4,
+                                              {pane: 'pane_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4'});
+        bounds_group.addLayer(layer_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4);
+        map.addLayer(layer_Increasingcroppingintensityofirrigatedriceinbothupstreamanddownstreamareas_4);
+        map.createPane('pane_Restorationofforestmosaiclandscapes_5');
+        map.getPane('pane_Restorationofforestmosaiclandscapes_5').style.zIndex = 405;
+        var img_Restorationofforestmosaiclandscapes_5 = 'data/Restorationofforestmosaiclandscapes_5.png';
+        var img_bounds_Restorationofforestmosaiclandscapes_5 = [[7.189537946368948,79.82972509019021],[8.440562935775374,81.06277364521755]];
+        var layer_Restorationofforestmosaiclandscapes_5 = new L.imageOverlay(img_Restorationofforestmosaiclandscapes_5,
+                                              img_bounds_Restorationofforestmosaiclandscapes_5,
+                                              {pane: 'pane_Restorationofforestmosaiclandscapes_5'});
+        bounds_group.addLayer(layer_Restorationofforestmosaiclandscapes_5);
+        map.addLayer(layer_Restorationofforestmosaiclandscapes_5);
+        map.createPane('pane_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6');
+        map.getPane('pane_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6').style.zIndex = 406;
+        var img_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6 = 'data/Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6.png';
+        var img_bounds_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6 = [[7.189537946368948,79.82972509019021],[8.440562935775374,81.06277364521755]];
+        var layer_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6 = new L.imageOverlay(img_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6,
+                                              img_bounds_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6,
+                                              {pane: 'pane_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6'});
+        bounds_group.addLayer(layer_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6);
+        map.addLayer(layer_Rehabilitationandestablishmentofvillagetankspondsandirrigationnetworks_6);
+        map.createPane('pane_Drainagemanagementalongroads_7');
+        map.getPane('pane_Drainagemanagementalongroads_7').style.zIndex = 407;
+        var img_Drainagemanagementalongroads_7 = 'data/Drainagemanagementalongroads_7.png';
+        var img_bounds_Drainagemanagementalongroads_7 = [[7.189537946368948,79.82972509019021],[8.440562935775374,81.06277364521755]];
+        var layer_Drainagemanagementalongroads_7 = new L.imageOverlay(img_Drainagemanagementalongroads_7,
+                                              img_bounds_Drainagemanagementalongroads_7,
+                                              {pane: 'pane_Drainagemanagementalongroads_7'});
+        bounds_group.addLayer(layer_Drainagemanagementalongroads_7);
+        map.addLayer(layer_Drainagemanagementalongroads_7);
+        map.createPane('pane_Streamsideprotection_8');
+        map.getPane('pane_Streamsideprotection_8').style.zIndex = 408;
+        var img_Streamsideprotection_8 = 'data/Streamsideprotection_8.png';
+        var img_bounds_Streamsideprotection_8 = [[7.18955968808468,79.82969483840972],[8.440584741818853,81.0627434588095]];
+        var layer_Streamsideprotection_8 = new L.imageOverlay(img_Streamsideprotection_8,
+                                              img_bounds_Streamsideprotection_8,
+                                              {pane: 'pane_Streamsideprotection_8'});
+        bounds_group.addLayer(layer_Streamsideprotection_8);
+        map.addLayer(layer_Streamsideprotection_8);
+        function pop_ProjectBoundary_9(feature, layer) {
+            layer.on({
+                mouseout: function(e) {
+                    if (typeof layer.closePopup == 'function') {
+                        layer.closePopup();
+                    } else {
+                        layer.eachLayer(function(feature){
+                            feature.closePopup()
+                        });
+                    }
+                },
+                mouseover: highlightFeature,
+            });
+            var popupContent = '<table>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['OBJECTID'] !== null ? autolinker.link(String(feature.properties['OBJECTID']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['SIDT_1'] !== null ? autolinker.link(String(feature.properties['SIDT_1']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Shape_Leng'] !== null ? autolinker.link(String(feature.properties['Shape_Leng']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Shape_Area'] !== null ? autolinker.link(String(feature.properties['Shape_Area']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                </table>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+			layer.on('popupopen', function(e) {
+				addClassToPopupIfMedia(content, e.popup);
+			});
+			layer.bindPopup(content, { maxHeight: 400 });
+        }
+
+        function style_ProjectBoundary_9_0() {
+            return {
+                pane: 'pane_ProjectBoundary_9',
+                opacity: 1,
+                color: 'rgba(228,26,28,1.0)',
+                dashArray: '',
+                lineCap: 'square',
+                lineJoin: 'bevel',
+                weight: 4.0,
+                fillOpacity: 0,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_ProjectBoundary_9');
+        map.getPane('pane_ProjectBoundary_9').style.zIndex = 409;
+        map.getPane('pane_ProjectBoundary_9').style['mix-blend-mode'] = 'normal';
+        var layer_ProjectBoundary_9 = new L.geoJson(json_ProjectBoundary_9, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_ProjectBoundary_9',
+            layerName: 'layer_ProjectBoundary_9',
+            pane: 'pane_ProjectBoundary_9',
+            onEachFeature: pop_ProjectBoundary_9,
+            style: style_ProjectBoundary_9_0,
+        });
+        bounds_group.addLayer(layer_ProjectBoundary_9);
+        map.addLayer(layer_ProjectBoundary_9);
+        setBounds();
+        var i = 0;
+        layer_ProjectBoundary_9.eachLayer(function(layer) {
+            var context = {
+                feature: layer.feature,
+                variables: {}
+            };
+            layer.bindTooltip((layer.feature.properties['SIDT_1'] !== null?String('<div style="color: #323232; font-size: 10pt; font-family: \'Open Sans\', sans-serif;">' + layer.feature.properties['SIDT_1']) + '</div>':''), {permanent: true, offset: [-0, -16], className: 'css_ProjectBoundary_9'});
+            labels.push(layer);
+            totalMarkers += 1;
+              layer.added = true;
+              addLabel(layer, i);
+              i++;
+        });
+        L.ImageOverlay.include({
+            getBounds: function () {
+                return this._bounds;
+            }
+        });
+        resetLabels([layer_ProjectBoundary_9]);
+        map.on("zoomend", function(){
+            resetLabels([layer_ProjectBoundary_9]);
+        });
+        map.on("layeradd", function(){
+            resetLabels([layer_ProjectBoundary_9]);
+        });
+        map.on("layerremove", function(){
+            resetLabels([layer_ProjectBoundary_9]);
+        });
+        </script>
     </body>
 </html>
